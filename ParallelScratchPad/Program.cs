@@ -1,6 +1,5 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.IO;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -17,7 +16,7 @@ namespace ParallelScratchPad
 
         private static void Runner1()
         {
-            LoopThroughTasks();
+            LoopThroughTasksIncorrect();
             //LoopThroughTasksCorrect();
             Finish();
         }
@@ -26,7 +25,7 @@ namespace ParallelScratchPad
         {
             for (int i = 0; i < 10; i++)
             {
-                LoopThroughTasksCorrect();
+                LoopThroughTasksSharedLock();
                 Finish();
             }
         }
@@ -44,7 +43,7 @@ namespace ParallelScratchPad
         /// <remarks>
         /// This fails because loop finishes before task runs, so only last value of i is repeatedly printed.
         /// </remarks>
-        private static void LoopThroughTasks()
+        private static void LoopThroughTasksIncorrect()
         {
             var tasks = new List<Task>();
 
@@ -138,13 +137,10 @@ namespace ParallelScratchPad
 
                     for (int j = 0; j < 10000; j++)
                     {
-                        lock (l)
-                        {
-                            hits++;
-                        }
+                        lock (l) hits++;
                     }
                 },
-                i); 
+                i);
 
                 tasks.Add(t);
             }
@@ -177,7 +173,7 @@ namespace ParallelScratchPad
                         Interlocked.Increment(ref hits); // hardware-based
                     }
                 },
-                i); 
+                i);
 
                 tasks.Add(t);
             }
@@ -212,7 +208,7 @@ namespace ParallelScratchPad
 
                     return localHits;
                 },
-                i); 
+                i);
 
                 tasks.Add(t);
             }
@@ -230,7 +226,7 @@ namespace ParallelScratchPad
         }
 
         /// <summary>
-        /// Loops through tasks with safe access to shared resource without locking.
+        /// Loops through tasks with safe access to shared resource without locking (optimised).
         /// </summary>
         /// <remarks>
         /// A local hits variable is defined for each task and returned at the end. Then all are summed.
@@ -255,7 +251,7 @@ namespace ParallelScratchPad
 
                     return localHits;
                 },
-                i); // i is captured when task is created, not when it starts - without this loop runs to end before task starts, so prints out 10
+                i);
 
                 tasks.Add(t);
             }
@@ -270,6 +266,14 @@ namespace ParallelScratchPad
         /// <summary>
         ///  Waits until all tasks finish, but processes results as each one completes.
         /// </summary>
+        /// <remarks>
+        /// This is based on:
+        /// 
+        /// <para>
+        /// Introduction to Async and Parallel Programming in .NET 4 by Dr Joe Hummel
+        /// <seealso href="http://app.pluralsight.com/courses/intro-async-parallel-dotnet4" />
+        /// </para>
+        /// </remarks>
         /// <param name="tasks">The tasks.</param>
         /// <returns>A collection of results from each task.</returns>
         private static List<int> WaitAllOneByOne(List<Task<int>> tasks)
@@ -285,5 +289,5 @@ namespace ParallelScratchPad
 
             return results;
         }
-   }
+    }
 }
