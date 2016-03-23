@@ -1,11 +1,15 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 
 namespace ParallelScratchPad
 {
+    /// <summary>
+    /// Illustrates various concepts in .NET 4.5 Task Parallel Library.
+    /// </summary>
     class Program
     {
         private static void Main(string[] args)
@@ -16,7 +20,8 @@ namespace ParallelScratchPad
 
         private static void Runner1()
         {
-            LoopThroughTasksIncorrect();
+            CreateLongRunningTasks();
+            //LoopThroughTasksIncorrect();
             //LoopThroughTasksCorrect();
             Finish();
         }
@@ -268,7 +273,7 @@ namespace ParallelScratchPad
         /// </summary>
         /// <remarks>
         /// This is based on:
-        /// 
+        ///
         /// <para>
         /// Introduction to Async and Parallel Programming in .NET 4 by Dr Joe Hummel
         /// <seealso href="http://app.pluralsight.com/courses/intro-async-parallel-dotnet4" />
@@ -288,6 +293,170 @@ namespace ParallelScratchPad
             }
 
             return results;
+        }
+
+        private static void Welcome(int numberOfTasks, int numberOfCores, int durationInMinutes, int durationInSeconds)
+        {
+            Console.WriteLine("**Long-running tasks App**");
+            Console.WriteLine("Number of tasks:\t" + numberOfTasks);
+            Console.WriteLine("Number of cores:\t" + numberOfCores);
+            Console.WriteLine(string.Format("Task duration: {0} mins, {1} secs", durationInMinutes, durationInSeconds));
+        }
+
+        /// <summary>
+        /// Creates long running tasks with no optimisation.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// Initially creates one task per core and then keeps injecting worker threads every few seconds and grabs the next task.
+        /// This is because each task is long-running, i.e., longer than a few seconds.
+        /// </para>
+        /// <para>
+        /// If you make the tasks run for, say, 5 minutes you will see the thread count in task manager creeping higher and higher.
+        /// Eventually the threads will climb to 100.
+        /// This is called over-subscription, with too many threads doing CPU-intensive work competing for cores.
+        /// </para>
+        /// </remarks>
+        private static void CreateLongRunningTasks()
+        {
+            int numberOfTasks = 100;
+            var tasks = new List<Task>();
+
+            int numberOfCores = Environment.ProcessorCount;
+            int durationInMinutes = 5;
+            int durationInSeconds = 0;
+
+            Welcome(numberOfTasks, numberOfCores, durationInMinutes, durationInSeconds);
+
+            TaskCreationOptions taskCreationOptions = TaskCreationOptions.None;
+
+            for (int i = 0; i < numberOfTasks; i++)
+            {
+                Task t = CreateLongRunningTask(durationInMinutes, durationInSeconds, taskCreationOptions);
+                tasks.Add(t);
+            }
+
+            Task.WaitAll(tasks.ToArray());
+        }
+
+        /// <summary>
+        /// Creates long running tasks with long-running option.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// Creates a dedicated worker thread for each task, so 100 are created straight away instead of one by one.
+        /// This is because each task is long-running, i.e., longer than a few seconds.
+        /// </para>
+        /// <para>
+        /// However, this is still over-subscribed.
+        /// </para>
+        /// </remarks>
+        private static void CreateLongRunningTasksWithLongRunningOption()
+        {
+            int numberOfTasks = 100;
+            var tasks = new List<Task>();
+
+            int numberOfCores = Environment.ProcessorCount;
+            int durationInMinutes = 5;
+            int durationInSeconds = 0;
+
+            Welcome(numberOfTasks, numberOfCores, durationInMinutes, durationInSeconds);
+
+            TaskCreationOptions taskCreationOptions = TaskCreationOptions.LongRunning;
+
+            for (int i = 0; i < numberOfTasks; i++)
+            {
+                Task t = CreateLongRunningTask(durationInMinutes, durationInSeconds, taskCreationOptions);
+                tasks.Add(t);
+            }
+
+            Task.WaitAll(tasks.ToArray());
+        }
+
+        /// <summary>
+        /// Creates long-running tasks (optimised).
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// Creates 100 tasks all at once and then waits for them to finish.
+        /// This is a technique to avoid too many threads competing for cores.
+        /// </para>
+        /// <para>
+        /// Initially we create as many tasks as the number of cores.
+        /// Then we start a new task as one finishes until there is no more work to do.
+        /// </para>
+        /// </remarks>
+        private static void CreateLongRunningTasksOptimised()
+        {
+            int numberOfTasks = 100;
+            var tasks = new List<Task>();
+
+            int numberOfCores = Environment.ProcessorCount;
+            int durationInMinutes = 5;
+            int durationInSeconds = 0;
+
+            Welcome(numberOfTasks, numberOfCores, durationInMinutes, durationInSeconds);
+
+            TaskCreationOptions taskCreationOptions = TaskCreationOptions.None;
+
+            for (int i = 0; i < numberOfCores; i++)
+            {
+                Task t = CreateLongRunningTask(durationInMinutes, durationInSeconds, taskCreationOptions);
+                tasks.Add(t);
+            }
+
+            // Variation of "Wait All One By One" pattern
+            while (tasks.Any())
+            {
+                int index = Task.WaitAny(tasks.ToArray());
+                tasks.RemoveAt(index);
+
+                numberOfTasks--;
+
+                bool moreWorkToDo = numberOfTasks > 0;
+
+                if (moreWorkToDo)
+                {
+                    // Create another task
+                    Task t = CreateLongRunningTask(durationInMinutes, durationInSeconds, taskCreationOptions);
+                    tasks.Add(t);
+                }
+            }
+        }
+
+        /// <summary>
+        /// Creates a long running task of the specified duration.
+        /// </summary>
+        /// <param name="durationInMinutes">The duration in minutes.</param>
+        /// <param name="durationInSeconds">The duration in seconds.</param>
+        /// <param name="taskCreationOptions">The task creation options.</param>
+        /// <returns></returns>
+        private static Task CreateLongRunningTask(int durationInMinutes, int durationInSeconds, TaskCreationOptions taskCreationOptions)
+        {
+            long durationInMilliseconds = durationInMinutes * 60 * 1000 + durationInSeconds * 1000;
+
+            Task t = Task.Factory.StartNew(() =>
+            {
+                Console.WriteLine("Starting task...");
+
+                var stopwatch = Stopwatch.StartNew();
+                long count = 0;
+
+                while (stopwatch.ElapsedMilliseconds < durationInMilliseconds)
+                {
+                    count++;
+
+                    if (count == 1000000000)
+                    {
+                        count = 0;
+                    }
+                }
+
+                Console.WriteLine("Task finished.");
+            },
+            taskCreationOptions);
+
+            return t;
         }
     }
 }
