@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
@@ -20,7 +21,8 @@ namespace ParallelScratchPad
 
         private static void Runner1()
         {
-            CreateLongRunningTasks();
+            ParallelLoopWithErrorsWrapper();
+            //CreateLongRunningTasks();
             //LoopThroughTasksIncorrect();
             //LoopThroughTasksCorrect();
             Finish();
@@ -457,6 +459,61 @@ namespace ParallelScratchPad
             taskCreationOptions);
 
             return t;
+        }
+
+        /// <summary>
+        /// Parallel foreach loop containing errors. Errors are aggregated and output at end.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// If an error occurs in a thread then the other threads are allowed to complete (but no new threads are started).
+        /// </para>
+        /// <para>
+        /// After they finish, the parallel loop will throw an exception in the context of the thread that invoked it. 
+        /// </para>
+        /// <para>
+        /// The errors are aggregated at the end. 
+        /// </para>
+        /// <para>
+        /// In this example, though, all threads complete as the work done by each is so trivial.
+        /// </para>
+        /// </remarks>
+        private static void ParallelLoopWithErrorsWrapper()
+        {
+            try
+            {
+                ParallelLoopWithErrors();
+            }
+            catch (AggregateException ae)
+            {
+                ae = ae.Flatten(); // flatten tree to process exceptions at the leaves
+                foreach (var ex in ae.InnerExceptions)
+                    Console.WriteLine(ex.Message);
+            }
+        }
+
+        private static void ParallelLoopWithErrors()
+        {
+            var numbers = new List<int>() { 1, 2, 3, 4, 5, 0, 7, 8, 0, 10 };
+
+            var exceptions = new ConcurrentQueue<Exception>();
+
+            Parallel.ForEach(numbers, n =>
+            {
+                try
+                {
+                    int result = 10 / n;
+                    Console.WriteLine("Number = {0}, Result = {1}", n, result);
+                }
+                catch (Exception ex)
+                {
+                    exceptions.Enqueue(ex);
+                }
+            });
+
+            Console.WriteLine(Environment.NewLine);
+
+            if (exceptions.Any()) throw new AggregateException(exceptions);
         }
     }
 }
